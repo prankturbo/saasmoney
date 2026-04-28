@@ -219,11 +219,10 @@ export function getRedirectPathForRole(role: UserRole): string {
 // SUPABASE DATA FUNCTIONS
 // ============================================
 
-const supabase = getSupabaseClient();
 
 // Invitations
 export async function getInvitations(): Promise<InvitationCode[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("invitation_codes")
     .select("*, closer:profiles!closer_id(name)")
     .order("created_at", { ascending: false });
@@ -237,7 +236,7 @@ export async function getInvitations(): Promise<InvitationCode[]> {
 
 export async function getInvitationsByCloser(closerId: string): Promise<InvitationCode[]> {
   console.log("Fetching invitations for closer:", closerId);
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("invitation_codes")
     .select("*, closer:profiles!closer_id(name)")
     .eq("closer_id", closerId)
@@ -258,7 +257,7 @@ export async function getInvitationsByCloser(closerId: string): Promise<Invitati
 }
 
 export async function saveInvitation(invitation: Omit<InvitationCode, "id" | "created_at" | "closer">): Promise<InvitationCode | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("invitation_codes")
     .insert(invitation)
     .select()
@@ -279,7 +278,7 @@ export async function saveInvitation(invitation: Omit<InvitationCode, "id" | "cr
 }
 
 export async function getInvitationByCode(code: string): Promise<InvitationCode | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("invitation_codes")
     .select("*, closer:profiles!closer_id(name)")
     .eq("code", code)
@@ -293,7 +292,7 @@ export async function getInvitationByCode(code: string): Promise<InvitationCode 
 }
 
 export async function useInvitation(code: string, userId: string): Promise<boolean> {
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from("invitation_codes")
     .update({ used: true, used_by: userId, used_at: new Date().toISOString() })
     .eq("code", code)
@@ -317,7 +316,7 @@ export function generateInviteCode(): string {
 
 // Students
 export async function getStudents(): Promise<StudentRecord[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("students")
     .select(`
       *,
@@ -335,7 +334,7 @@ export async function getStudents(): Promise<StudentRecord[]> {
 }
 
 export async function getStudentsByCloser(closerId: string): Promise<StudentRecord[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("students")
     .select(`
       *,
@@ -353,7 +352,7 @@ export async function getStudentsByCloser(closerId: string): Promise<StudentReco
 }
 
 export async function getStudentById(studentId: string): Promise<StudentRecord | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("students")
     .select(`
       *,
@@ -372,7 +371,7 @@ export async function getStudentById(studentId: string): Promise<StudentRecord |
 }
 
 export async function getStudentByUserId(userId: string): Promise<StudentRecord | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("students")
     .select(`
       *,
@@ -427,7 +426,7 @@ export async function createStudentFromInvitation(
     hotseats_used: 0,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseClient()
     .from("students")
     .insert(studentData)
     .select()
@@ -716,7 +715,7 @@ function getStartOfWeek(date: Date): Date {
 }
 
 export async function recordHotSeatBooking(userId: string): Promise<boolean> {
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from("students")
     .update({
       hotseats_used: supabase.rpc("increment_hotseats_used"),
@@ -746,7 +745,7 @@ export async function recordOneOfOneBooking(userId: string): Promise<boolean> {
   const student = await getStudentByUserId(userId);
   if (!student || student.coins_available < 1000) return false;
 
-  const { error } = await supabase
+  const { error } = await getSupabaseClient()
     .from("students")
     .update({
       coins_available: student.coins_available - 1000,
