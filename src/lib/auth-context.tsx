@@ -873,10 +873,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!isMounted) return;
 
       if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") && session?.user) {
-        const profile = await loadUserProfile(session.user);
-        if (isMounted) {
-          setUser(profile);
-          setIsLoading(false);
+        try {
+          const profile = await loadUserProfile(session.user);
+          if (isMounted) {
+            setUser(profile);
+          }
+        } catch (err) {
+          console.error("Error loading auth profile:", err);
+          if (isMounted) {
+            setUser(null);
+          }
+        } finally {
+          if (isMounted) {
+            setIsLoading(false);
+          }
         }
         return;
       }
@@ -892,10 +902,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (event === "INITIAL_SESSION") {
         if (session?.user) {
-          const profile = await loadUserProfile(session.user);
-          if (isMounted) {
-            setUser(profile);
-            setIsLoading(false);
+          try {
+            const profile = await loadUserProfile(session.user);
+            if (isMounted) {
+              setUser(profile);
+            }
+          } catch (err) {
+            console.error("Error loading initial auth profile:", err);
+            if (isMounted) {
+              setUser(null);
+            }
+          } finally {
+            if (isMounted) {
+              setIsLoading(false);
+            }
           }
         } else if (isMounted) {
           setIsLoading(false);
@@ -926,10 +946,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (data.user) {
-      const profile = await loadUserProfile(data.user);
-      setUser(profile);
-      setIsLoading(false);
-      return { error: null, user: profile || undefined };
+      try {
+        const profile = await loadUserProfile(data.user);
+        setUser(profile);
+        return { error: null, user: profile || undefined };
+      } catch (err) {
+        console.error("Error loading profile after login:", err);
+        setUser(null);
+        return { error: "Impossible de charger le profil utilisateur" };
+      } finally {
+        setIsLoading(false);
+      }
     }
 
     setIsLoading(false);
@@ -996,10 +1023,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const profile = await loadUserProfile(data.user);
-      setUser(profile);
-      setIsLoading(false);
-      return { error: null, user: profile || undefined };
+      try {
+        const profile = await loadUserProfile(data.user);
+        setUser(profile);
+        return { error: null, user: profile || undefined };
+      } catch (err) {
+        console.error("Error loading profile after registration:", err);
+        setUser(null);
+        return { error: "Impossible de charger le profil utilisateur" };
+      } finally {
+        setIsLoading(false);
+      }
     }
 
     setIsLoading(false);

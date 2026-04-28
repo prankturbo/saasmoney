@@ -114,7 +114,10 @@ export default function RemboursementPage() {
   // Load or create conversation
   useEffect(() => {
     const loadConversation = async () => {
-      if (!user?.id) return;
+      if (!user?.id) {
+        setLoading(false);
+        return;
+      }
 
       try {
         setConversationError(null);

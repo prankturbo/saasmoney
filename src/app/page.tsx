@@ -3,19 +3,21 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
+import { getRedirectPathForRole, useAuth } from "@/lib/auth-context";
 
 export default function HomePage() {
   const router = useRouter();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    // Check if user is logged in
-    const user = localStorage.getItem("saasmoney_user");
+    if (isLoading) return;
+
     if (user) {
-      router.push("/app");
+      router.replace(getRedirectPathForRole(user.role));
     } else {
-      router.push("/auth/login");
+      router.replace("/auth/login");
     }
-  }, [router]);
+  }, [user, isLoading, router]);
 
   return (
     <div className="min-h-screen bg-gradient-soft bg-pattern flex items-center justify-center">
