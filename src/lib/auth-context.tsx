@@ -407,57 +407,24 @@ export async function createStudentFromInvitation(
   invitation: InvitationCode,
   userId: string
 ): Promise<StudentRecord | null> {
-  const pkg = getPackageInfo(invitation.package_type);
-  const priceNumber = parseInt(invitation.package_type);
-  const needsProgressiveUnlock = invitation.package_type === "3000" || invitation.package_type === "5000" || invitation.package_type === "15000";
-
-  const studentData = {
-    user_id: userId,
-    closer_id: invitation.closer_id,
-    package_type: invitation.package_type,
-    invitation_code: invitation.code,
-    total_price: priceNumber,
-    total_paid: needsProgressiveUnlock ? 0 : priceNumber,
-    total_coins: pkg.coins,
-    coins_unlocked: needsProgressiveUnlock ? 0 : pkg.coins,
-    coins_available: needsProgressiveUnlock ? 0 : pkg.coins,
-    one_to_one_count: pkg.oneToOneCount,
-    hotseats_total: pkg.hotSeats.total,
-    hotseats_per_week: pkg.hotSeats.perWeek,
-    hotseats_duration: pkg.hotSeats.duration,
-    hotseats_used: 0,
-  };
-
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("students")
-    .insert(studentData)
-    .select()
+  const { data, error } = await getSupabaseClient()
+    .rpc("activate_student_invitation", {
+      p_code: invitation.code,
+      p_user_id: userId,
+    })
     .single();
 
   if (error) {
-    console.error("Error creating student:", error);
-    console.error("Student data:", studentData);
-    console.error("Error details:", {
+    console.error("Error activating student invitation:", {
+      code: error.code,
       message: error.message,
       details: error.details,
       hint: error.hint,
-      code: error.code,
     });
     return null;
   }
 
-  // Si pas de déblocage progressif, créer le paiement initial
-  if (!needsProgressiveUnlock && pkg.coins > 0) {
-    await supabase.from("student_payments").insert({
-      student_id: data.id,
-      amount: priceNumber,
-      coins_unlocked: pkg.coins,
-      note: "Paiement initial complet",
-    });
-  }
-
-  return data;
+  return data as StudentRecord;
 }
 
 export async function unlockCoinsForStudent(
@@ -987,12 +954,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq("id", data.user.id);
 
       if (invitation) {
-        const invitationUsed = await useInvitation(invitation.code, data.user.id);
-        if (!invitationUsed) {
-          setIsLoading(false);
-          return { error: "Impossible d'utiliser ce code d'invitation" };
-        }
-
         const studentRecord = await createStudentFromInvitation(invitation, data.user.id);
         if (!studentRecord) {
           setIsLoading(false);

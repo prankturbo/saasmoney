@@ -345,8 +345,8 @@ export default function RemboursementPage() {
               }),
             });
 
-            if (response.ok) {
-              // Realtime receives the AI response insert.
+            if (!response.ok) {
+              setIsAiTyping(false);
             }
           } catch (aiError) {
             console.error("Error getting AI response:", aiError);
