@@ -426,7 +426,8 @@ export async function createStudentFromInvitation(
     hotseats_used: 0,
   };
 
-  const { data, error } = await getSupabaseClient()
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
     .from("students")
     .insert(studentData)
     .select()
@@ -462,6 +463,7 @@ export async function unlockCoinsForStudent(
   amount: number,
   note?: string
 ): Promise<boolean> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase.rpc("unlock_student_coins", {
     p_student_id: studentId,
     p_amount: amount,
@@ -715,7 +717,8 @@ function getStartOfWeek(date: Date): Date {
 }
 
 export async function recordHotSeatBooking(userId: string): Promise<boolean> {
-  const { error } = await getSupabaseClient()
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
     .from("students")
     .update({
       hotseats_used: supabase.rpc("increment_hotseats_used"),
@@ -745,7 +748,8 @@ export async function recordOneOfOneBooking(userId: string): Promise<boolean> {
   const student = await getStudentByUserId(userId);
   if (!student || student.coins_available < 1000) return false;
 
-  const { error } = await getSupabaseClient()
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
     .from("students")
     .update({
       coins_available: student.coins_available - 1000,
@@ -772,6 +776,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const supabase = getSupabaseClient();
 
   // Load user profile from Supabase
   const loadUserProfile = async (authUser: User): Promise<AuthUser | null> => {
