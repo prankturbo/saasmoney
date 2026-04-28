@@ -100,6 +100,7 @@ export default function RemboursementPage() {
   const [isAiHandled, setIsAiHandled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [isAiTyping, setIsAiTyping] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
 
   // Scroll to bottom when messages change
@@ -109,7 +110,7 @@ export default function RemboursementPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isAiTyping]);
 
   // Load or create conversation
   useEffect(() => {
@@ -231,8 +232,15 @@ export default function RemboursementPage() {
           table: "refund_messages",
           filter: `conversation_id=eq.${conversationId}`,
         },
-        async () => {
-          await loadMessages(conversationId);
+        (payload) => {
+          const message = payload.new as Message;
+          if (message.user_id !== user?.id) {
+            setIsAiTyping(false);
+          }
+          setMessages((current) => {
+            if (current.some((item) => item.id === message.id)) return current;
+            return [...current, message];
+          });
         }
       )
       .on(
@@ -316,11 +324,14 @@ export default function RemboursementPage() {
 
       if (error) throw error;
 
-      setMessages([...messages, data]);
+      setMessages((current) => {
+        if (current.some((item) => item.id === data.id)) return current;
+        return [...current, data];
+      });
 
       // If AI is handling this conversation, trigger AI response
       if (isAiHandled) {
-        // Wait a bit before showing AI response
+        setIsAiTyping(true);
         setTimeout(async () => {
           try {
             const response = await fetch("/api/refund-ai", {
@@ -329,17 +340,17 @@ export default function RemboursementPage() {
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                conversationId,
+                conversationId: activeConversationId,
                 userMessage: messageContent,
               }),
             });
 
             if (response.ok) {
-              // Reload messages to get AI response
-              await loadMessages(conversationId);
+              // Realtime receives the AI response insert.
             }
           } catch (aiError) {
             console.error("Error getting AI response:", aiError);
+            setIsAiTyping(false);
           }
         }, 1000);
       }
@@ -487,6 +498,23 @@ export default function RemboursementPage() {
                   </div>
                 );
               })}
+              {isAiTyping && (
+                <div className="flex gap-3">
+                  <Avatar name="Assistant IA" size="sm" />
+                  <div className="max-w-[70%] space-y-1">
+                    <div className="px-4 py-3 rounded-2xl bg-orange-100 text-orange-900">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span>L'assistant IA écrit</span>
+                        <span className="flex gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-bounce" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-bounce [animation-delay:120ms]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-bounce [animation-delay:240ms]" />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </>
           )}

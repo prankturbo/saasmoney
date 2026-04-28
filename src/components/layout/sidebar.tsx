@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { useAuth, getUserPermissions, UserPermissions } from "@/lib/auth-context";
+import { useAuth, getUserPermissionsSync, UserPermissions } from "@/lib/auth-context";
 import { LucideIcon } from "lucide-react";
 import {
   Sparkles,
@@ -39,23 +39,13 @@ const navItems: NavItem[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
-  const [permissions, setPermissions] = useState<UserPermissions | null>(null);
 
   // Seul l'admin peut voir les liens vers les autres espaces
   const isAdmin = user?.role === "admin";
-
-  // Charger les permissions de l'utilisateur
-  useEffect(() => {
-    const loadPermissions = async () => {
-      if (user?.id && user.role === "user") {
-        const perms = await getUserPermissions(user.id);
-        setPermissions(perms);
-      } else {
-        setPermissions(null);
-      }
-    };
-    loadPermissions();
-  }, [user?.id, user?.role]);
+  const permissions = useMemo(
+    () => user?.id && user.role === "user" ? getUserPermissionsSync(user.id) : null,
+    [user?.id, user?.role]
+  );
   
   // Vérifier si l'utilisateur a un forfait
   const hasPackage = permissions?.packageType !== null && permissions?.packageType !== undefined;

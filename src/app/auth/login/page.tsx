@@ -21,7 +21,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (user) {
       const redirectPath = getRedirectPathForRole(user.role);
-      router.push(redirectPath);
+      router.replace(redirectPath);
     }
   }, [user, router]);
 
@@ -38,7 +38,8 @@ export default function LoginPage() {
       } else if (result.user) {
         // Rediriger selon le rôle
         const redirectPath = getRedirectPathForRole(result.user.role);
-        router.push(redirectPath);
+        router.replace(redirectPath);
+        setLoading(false);
       }
     } catch {
       setError("Une erreur est survenue");

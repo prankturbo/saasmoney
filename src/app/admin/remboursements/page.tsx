@@ -52,6 +52,7 @@ export default function AdminRemboursementsPage() {
   const { user } = useAuth();
   const supabase = getSupabaseClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const selectedConversationRef = useRef<Conversation | null>(null);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -64,6 +65,10 @@ export default function AdminRemboursementsPage() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation;
+  }, [selectedConversation]);
 
   useEffect(() => {
     scrollToBottom();
@@ -122,7 +127,31 @@ export default function AdminRemboursementsPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "refund_conversations" },
-        async () => {
+        async (payload) => {
+          if (payload.eventType === "INSERT") {
+            await loadConversations();
+            return;
+          }
+
+          if (payload.eventType === "UPDATE") {
+            const updatedConversation = payload.new as Partial<Conversation> & { id: string };
+            setConversations((current) =>
+              current
+                .map((conversation) =>
+                  conversation.id === updatedConversation.id
+                    ? { ...conversation, ...updatedConversation }
+                    : conversation
+                )
+                .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+            );
+            setSelectedConversation((current) =>
+              current?.id === updatedConversation.id
+                ? { ...current, ...updatedConversation }
+                : current
+            );
+            return;
+          }
+
           await loadConversations();
         }
       )
@@ -131,10 +160,14 @@ export default function AdminRemboursementsPage() {
         { event: "INSERT", schema: "public", table: "refund_messages" },
         async (payload) => {
           const message = payload.new as Message;
+          const selectedConversationId = selectedConversationRef.current?.id;
           await loadConversations();
 
-          if (selectedConversation?.id === message.conversation_id) {
-            await loadMessages(message.conversation_id);
+          if (selectedConversationId === message.conversation_id) {
+            setMessages((current) => {
+              if (current.some((item) => item.id === message.id)) return current;
+              return [...current, message];
+            });
           }
         }
       )
@@ -143,7 +176,7 @@ export default function AdminRemboursementsPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.role, selectedConversation?.id, supabase]);
+  }, [user?.role, supabase]);
 
   // Select conversation
   const handleSelectConversation = async (conv: Conversation) => {
@@ -173,7 +206,10 @@ export default function AdminRemboursementsPage() {
 
       if (error) throw error;
 
-      setMessages([...messages, data]);
+      setMessages((current) => {
+        if (current.some((item) => item.id === data.id)) return current;
+        return [...current, data];
+      });
       setNewMessage("");
     } catch (err) {
       console.error("Error sending message:", err);

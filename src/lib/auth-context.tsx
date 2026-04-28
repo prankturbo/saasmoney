@@ -5,6 +5,8 @@ import {
   useContext,
   useState,
   useEffect,
+  useCallback,
+  useRef,
   ReactNode,
 } from "react";
 import { getSupabaseClient } from "./supabase/client";
@@ -776,10 +778,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const profileLoadRef = useRef<Map<string, Promise<AuthUser | null>>>(new Map());
   const supabase = getSupabaseClient();
 
-  // Load user profile from Supabase
-  const loadUserProfile = async (authUser: User): Promise<AuthUser | null> => {
+  const loadUserProfile = useCallback(async (authUser: User): Promise<AuthUser | null> => {
     const getRoleFromMetadata = (role: unknown): UserRole => {
       if (role === "admin" || role === "coach" || role === "closer" || role === "user") {
         return role;
@@ -841,96 +843,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     return fallbackProfile;
-  };
+  }, [supabase]);
+
+  const loadUserProfileOnce = useCallback((authUser: User) => {
+    const pendingProfile = profileLoadRef.current.get(authUser.id);
+    if (pendingProfile) return pendingProfile;
+
+    const profilePromise = loadUserProfile(authUser).finally(() => {
+      profileLoadRef.current.delete(authUser.id);
+    });
+    profileLoadRef.current.set(authUser.id, profilePromise);
+    return profilePromise;
+  }, [loadUserProfile]);
+
+  const applyAuthUser = useCallback(async (authUser: User, isMounted: () => boolean) => {
+    const profile = await loadUserProfileOnce(authUser);
+    if (isMounted()) {
+      setUser(profile);
+    }
+    return profile;
+  }, [loadUserProfileOnce]);
 
   // Initialize auth state
   useEffect(() => {
     let isMounted = true;
-    
-    const initAuth = async () => {
+    const isStillMounted = () => isMounted;
+
+    const loadSessionUser = async (authUser: User) => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user && isMounted) {
-          const profile = await loadUserProfile(session.user);
-          if (isMounted) {
-            setUser(profile);
-            setIsLoading(false);
-          }
-        } else if (isMounted) {
-          setIsLoading(false);
-        }
+        await applyAuthUser(authUser, isStillMounted);
       } catch (err) {
-        console.error("Error initializing auth:", err);
+        console.error("Error loading auth profile:", err);
+        if (isMounted) {
+          setUser(null);
+        }
+      } finally {
         if (isMounted) {
           setIsLoading(false);
         }
       }
     };
 
-    // Listen for auth changes FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return;
 
-      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") && session?.user) {
-        try {
-          const profile = await loadUserProfile(session.user);
-          if (isMounted) {
-            setUser(profile);
-          }
-        } catch (err) {
-          console.error("Error loading auth profile:", err);
-          if (isMounted) {
-            setUser(null);
-          }
-        } finally {
-          if (isMounted) {
-            setIsLoading(false);
-          }
-        }
+      if ((event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") && session?.user) {
+        void loadSessionUser(session.user);
         return;
       }
 
       if (event === "SIGNED_OUT") {
-        if (isMounted) {
-          setUser(null);
-          setIsLoading(false);
-          cachedStudentData.clear();
-        }
+        setUser(null);
+        setIsLoading(false);
+        cachedStudentData.clear();
         return;
       }
 
       if (event === "INITIAL_SESSION") {
-        if (session?.user) {
-          try {
-            const profile = await loadUserProfile(session.user);
-            if (isMounted) {
-              setUser(profile);
-            }
-          } catch (err) {
-            console.error("Error loading initial auth profile:", err);
-            if (isMounted) {
-              setUser(null);
-            }
-          } finally {
-            if (isMounted) {
-              setIsLoading(false);
-            }
-          }
-        } else if (isMounted) {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       }
     });
-
-    // Then check current session
-    initAuth();
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [applyAuthUser, supabase]);
 
   const login = async (email: string, password: string): Promise<AuthResult> => {
     setIsLoading(true);
@@ -947,8 +925,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (data.user) {
       try {
-        const profile = await loadUserProfile(data.user);
-        setUser(profile);
+        const profile = await applyAuthUser(data.user, () => true);
         return { error: null, user: profile || undefined };
       } catch (err) {
         console.error("Error loading profile after login:", err);
@@ -1009,23 +986,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .update({ name })
         .eq("id", data.user.id);
 
-      // Use invitation and create student record
       if (invitation) {
-        console.log("📝 Using invitation:", invitation.code, "package:", invitation.package_type);
         const invitationUsed = await useInvitation(invitation.code, data.user.id);
-        console.log("✅ Invitation marked as used:", invitationUsed);
-        
+        if (!invitationUsed) {
+          setIsLoading(false);
+          return { error: "Impossible d'utiliser ce code d'invitation" };
+        }
+
         const studentRecord = await createStudentFromInvitation(invitation, data.user.id);
-        if (studentRecord) {
-          console.log("✅ Student record created:", studentRecord);
-        } else {
-          console.error("❌ Failed to create student record");
+        if (!studentRecord) {
+          setIsLoading(false);
+          return { error: "Compte créé, mais impossible d'activer le forfait. Contacte le support." };
         }
       }
 
       try {
-        const profile = await loadUserProfile(data.user);
-        setUser(profile);
+        const profile = await applyAuthUser(data.user, () => true);
         return { error: null, user: profile || undefined };
       } catch (err) {
         console.error("Error loading profile after registration:", err);
@@ -1061,9 +1037,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
-      const profile = await loadUserProfile(session.user);
-      setUser(profile);
-      await supabase.auth.refreshSession();
+      await applyAuthUser(session.user, () => true);
     }
   };
 
