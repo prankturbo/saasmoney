@@ -85,7 +85,6 @@ src/lib/supabase/
 └── types.ts         # Types TypeScript
 
 src/hooks/
-├── use-conversations.ts  # Hook pour le chat IA
 └── use-bookings.ts       # Hooks pour les réservations
 ```
 

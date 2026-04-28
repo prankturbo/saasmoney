@@ -154,9 +154,10 @@ export default function RemboursementPage() {
               setIsAiHandled(false);
               await loadMessages(fallbackConvs[0].id);
             } else {
-              // No conversation found → show closed state
               setConversationId(null);
-              setConversationStatus("resolved");
+              setConversationStatus("open");
+              setIsAiHandled(false);
+              setMessages([]);
             }
             setLoading(false);
             return;
@@ -177,54 +178,11 @@ export default function RemboursementPage() {
           return;
         }
 
-        // Step 3: No active conversation → check if ALL conversations are closed
-        const { data: allConvs } = await supabase
-          .from("refund_conversations")
-          .select("status")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        // No conversation at all, or all are resolved/cancelled → show closed state
-        if (!allConvs?.length || allConvs[0].status !== "open") {
-          setConversationId(null);
-          setConversationStatus("resolved");
-          setLoading(false);
-          return;
-        }
-
-        // Step 4: No conversation exists → create one
-        const { data: newConv, error: createError } = await supabase
-          .from("refund_conversations")
-          .insert({ user_id: user.id, status: "open" })
-          .select()
-          .single();
-
-        if (createError) {
-          if (isMissingColumnError(createError, "status")) {
-            const { data: fallbackCreate } = await supabase
-              .from("refund_conversations")
-              .insert({ user_id: user.id })
-              .select()
-              .single();
-
-            if (fallbackCreate) {
-              setConversationId(fallbackCreate.id);
-              setConversationStatus("open");
-              setIsAiHandled(false);
-            } else {
-              setConversationError(getConversationErrorMessage(createError));
-            }
-          } else {
-            setConversationError(getConversationErrorMessage(createError));
-          }
-          setLoading(false);
-          return;
-        }
-
-        setConversationId(newConv.id);
+        // Step 3: No active conversation → wait for the first message before creating one
+        setConversationId(null);
         setConversationStatus("open");
         setIsAiHandled(false);
+        setMessages([]);
         setLoading(false);
       } catch (err) {
         console.error("Exception:", err);
@@ -257,20 +215,93 @@ export default function RemboursementPage() {
     }
   };
 
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const channel = supabase
+      .channel(`refund-conversation-${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "refund_messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        async () => {
+          await loadMessages(conversationId);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "refund_conversations",
+          filter: `id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const conversation = payload.new as Partial<Conversation>;
+          if (conversation.status) {
+            setConversationStatus(conversation.status);
+          }
+          if (typeof conversation.ai_handled === "boolean") {
+            setIsAiHandled(conversation.ai_handled);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId, supabase]);
+
   // Send message
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !conversationId || !user?.id || sending) return;
+    if (!newMessage.trim() || !user?.id || sending) return;
 
     setSending(true);
     const messageContent = newMessage.trim();
     setNewMessage(""); // Clear input immediately
 
     try {
+      let activeConversationId = conversationId;
+
+      if (!activeConversationId) {
+        const { data: newConv, error: createError } = await supabase
+          .from("refund_conversations")
+          .insert({ user_id: user.id, status: "open" })
+          .select("id")
+          .single();
+
+        if (createError) {
+          if (!isMissingColumnError(createError, "status")) {
+            throw createError;
+          }
+
+          const { data: fallbackCreate, error: fallbackCreateError } = await supabase
+            .from("refund_conversations")
+            .insert({ user_id: user.id })
+            .select("id")
+            .single();
+
+          if (fallbackCreateError) throw fallbackCreateError;
+          activeConversationId = fallbackCreate.id;
+        } else {
+          activeConversationId = newConv.id;
+        }
+
+        setConversationId(activeConversationId);
+        setConversationStatus("open");
+        setIsAiHandled(false);
+      }
+
       // Send user message
       const { data, error } = await supabase
         .from("refund_messages")
         .insert({
-          conversation_id: conversationId,
+          conversation_id: activeConversationId,
           user_id: user.id,
           message: messageContent,
         })
@@ -311,6 +342,7 @@ export default function RemboursementPage() {
       }
     } catch (err) {
       console.error("Error sending message:", err);
+      setConversationError(getConversationErrorMessage(err as SupabaseErrorLike));
       setNewMessage(messageContent); // Restore message on error
     } finally {
       setSending(false);
@@ -477,7 +509,7 @@ export default function RemboursementPage() {
               <Button
                 variant="gradient"
                 onClick={handleSendMessage}
-                disabled={!newMessage.trim() || sending || !conversationId || !!conversationError}
+                disabled={!newMessage.trim() || sending || !!conversationError}
                 loading={sending}
               >
                 <Send className="w-4 h-4" />

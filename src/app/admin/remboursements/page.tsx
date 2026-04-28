@@ -69,27 +69,27 @@ export default function AdminRemboursementsPage() {
     scrollToBottom();
   }, [messages]);
 
+  const loadConversations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("refund_conversations")
+        .select(`
+          *,
+          user:user_id(id, name, email, avatar_url)
+        `)
+        .order("updated_at", { ascending: false });
+
+      if (error) throw error;
+      setConversations(data || []);
+      setLoading(false);
+    } catch (err) {
+      console.error("Error loading conversations:", err);
+      setLoading(false);
+    }
+  };
+
   // Load all conversations
   useEffect(() => {
-    const loadConversations = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("refund_conversations")
-          .select(`
-            *,
-            user:user_id(id, name, email, avatar_url)
-          `)
-          .order("updated_at", { ascending: false });
-
-        if (error) throw error;
-        setConversations(data || []);
-        setLoading(false);
-      } catch (err) {
-        console.error("Error loading conversations:", err);
-        setLoading(false);
-      }
-    };
-
     if (user?.role === "admin") {
       loadConversations();
     }
@@ -113,6 +113,37 @@ export default function AdminRemboursementsPage() {
       console.error("Error loading messages:", err);
     }
   };
+
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+
+    const channel = supabase
+      .channel("refund-admin-conversations")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "refund_conversations" },
+        async () => {
+          await loadConversations();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "refund_messages" },
+        async (payload) => {
+          const message = payload.new as Message;
+          await loadConversations();
+
+          if (selectedConversation?.id === message.conversation_id) {
+            await loadMessages(message.conversation_id);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.role, selectedConversation?.id, supabase]);
 
   // Select conversation
   const handleSelectConversation = async (conv: Conversation) => {
