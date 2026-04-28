@@ -137,7 +137,7 @@ Toutes les tables ont RLS activé avec des policies appropriées :
 ## 🚀 Lancer l'application
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 L'application sera disponible sur [http://localhost:3000](http://localhost:3000)

@@ -381,35 +381,16 @@ ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 -- ============================================
 -- POLICIES: profiles
 -- ============================================
-CREATE POLICY "Users can view their own profile"
+CREATE POLICY "Authenticated users can view profiles"
   ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
+  TO authenticated
+  USING (true);
 
 CREATE POLICY "Users can update their own profile"
   ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
-CREATE POLICY "Admins can view all profiles"
-  ON public.profiles FOR SELECT
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
-
-CREATE POLICY "Coaches can view user profiles"
-  ON public.profiles FOR SELECT
-  USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('coach', 'admin'))
-  );
-
-CREATE POLICY "Closers can view their students profiles"
-  ON public.profiles FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.students s 
-      WHERE s.user_id = profiles.id 
-      AND s.closer_id = auth.uid()
-    )
-  );
+  TO authenticated
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
 
 -- ============================================
 -- POLICIES: invitation_codes

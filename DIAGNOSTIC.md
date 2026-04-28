@@ -23,7 +23,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=votre-clé-anon-ici
    - Allez dans **Settings** > **API**
    - Copiez la clé **anon public**
 
-4. **Redémarrez le serveur** : `npm run dev`
+4. **Redémarrez le serveur** : `bun run dev`
 
 ### Option 2 : Profil utilisateur manquant dans Supabase 🗄️
 L'utilisateur existe dans `auth.users` mais pas dans la table `profiles`.

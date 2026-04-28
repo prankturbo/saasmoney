@@ -1,47 +1,44 @@
 -- ============================================
--- FIX RLS POLICIES POUR PROFILES
+-- FIX RLS V3 - SUPPRIMER LA RÉCURSION PROFILES <-> STUDENTS
 -- ============================================
+-- Objectif: corriger l'erreur PostgREST 42P17 due à des policies récursives
 -- Exécuter ce script dans Supabase SQL Editor
 -- ============================================
 
--- 1. D'abord, vérifions que les profils existent
-SELECT id, email, name, role FROM public.profiles;
+BEGIN;
 
--- 2. Supprimer les anciennes policies sur profiles (elles se chevauchent)
+-- Assurer RLS active
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
+
+-- 1) Nettoyage policies profiles existantes (anciens noms inclus)
 DROP POLICY IF EXISTS "profiles_select_own" ON public.profiles;
 DROP POLICY IF EXISTS "allow_select_profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Authenticated users can view profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Users can view their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
 DROP POLICY IF EXISTS "allow_update_own_profile" ON public.profiles;
-DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Admins can view all profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Coaches can view user profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Coaches can view student profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Closers can view their students profiles" ON public.profiles;
 
--- 3. Créer des policies non récursives
-
--- SELECT: tout utilisateur authentifié peut lire les profils
+-- 2) Policies profiles non récursives
 CREATE POLICY "Authenticated users can view profiles"
   ON public.profiles FOR SELECT
   TO authenticated
   USING (true);
 
--- UPDATE: l'utilisateur peut modifier son propre profil
 CREATE POLICY "Users can update their own profile"
   ON public.profiles FOR UPDATE
   TO authenticated
   USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
 
--- INSERT: Seulement via le trigger (service role)
--- Pas besoin de policy car le trigger utilise SECURITY DEFINER
+COMMIT;
 
--- 4. Vérifier que RLS est bien activé
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- 5. Vérification finale
+-- 3) Vérification immédiate
 SELECT tablename, policyname, cmd
 FROM pg_policies
 WHERE schemaname = 'public' AND tablename IN ('profiles', 'students')

@@ -202,7 +202,7 @@ export default function AdminRemboursementsPage() {
         });
       }
 
-      // Send automatic message
+      // Send automatic confirmation message
       await supabase
         .from("refund_messages")
         .insert({
@@ -220,7 +220,7 @@ export default function AdminRemboursementsPage() {
     }
   };
 
-  // Refuse refund request (AI takes over)
+  // Refuse refund request — AI takes over immediately
   const refuseRefund = async (convId: string) => {
     try {
       const { error } = await supabase
@@ -248,7 +248,7 @@ export default function AdminRemboursementsPage() {
         });
       }
 
-      // Get the conversation to find the user's last message
+      // Get the user's last message to trigger AI response
       const { data: lastMessages } = await supabase
         .from("refund_messages")
         .select("message")
@@ -258,7 +258,7 @@ export default function AdminRemboursementsPage() {
 
       const userLastMessage = lastMessages?.[0]?.message || "Je souhaite demander un remboursement";
 
-      // Trigger AI response immediately
+      // Trigger AI response immediately (AI sends its own message to member)
       try {
         const aiResponse = await fetch("/api/refund-ai", {
           method: "POST",
@@ -272,26 +272,11 @@ export default function AdminRemboursementsPage() {
         });
 
         if (!aiResponse.ok) {
-          console.error("AI response failed:", await aiResponse.text());
-          // Fallback: send a manual message
-          await supabase
-            .from("refund_messages")
-            .insert({
-              conversation_id: convId,
-              user_id: user?.id,
-              message: "🤖 Bonjour ! Je suis l'assistant IA de SaaS Money. Je vais t'aider avec ta demande de remboursement.\n\nPour t'accompagner au mieux, j'ai besoin de comprendre ta situation. Peux-tu me dire :\n\n1. Quelle offre as-tu prise avec SaaS Money ? (3000€, 5000€ ou 15000€)\n2. Depuis combien de temps es-tu dans le programme ?",
-            });
+          const errorText = await aiResponse.text();
+          console.error("AI response failed:", errorText);
         }
       } catch (err) {
         console.error("Error calling AI:", err);
-        // Fallback: send a manual message
-        await supabase
-          .from("refund_messages")
-          .insert({
-            conversation_id: convId,
-            user_id: user?.id,
-            message: "🤖 Bonjour ! Je suis l'assistant IA de SaaS Money. Je vais t'aider avec ta demande de remboursement.\n\nPour t'accompagner au mieux, j'ai besoin de comprendre ta situation. Peux-tu me dire :\n\n1. Quelle offre as-tu prise avec SaaS Money ? (3000€, 5000€ ou 15000€)\n2. Depuis combien de temps es-tu dans le programme ?",
-          });
       }
 
       // Reload messages

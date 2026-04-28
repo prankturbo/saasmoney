@@ -13,8 +13,26 @@ import {
   Send,
   MessageSquare,
   Loader2,
+  CheckCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+interface Conversation {
+  id: string;
+  user_id: string;
+  status: "open" | "resolved" | "cancelled";
+  acceptance_status: "pending" | "accepted" | "refused";
+  ai_handled: boolean;
+  created_at: string;
+  updated_at: string;
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url: string | null;
+  };
+  unread_count?: number;
+}
 
 interface Message {
   id: string;
@@ -29,6 +47,46 @@ interface Message {
   };
 }
 
+function isMissingColumnError(
+  error: SupabaseErrorLike | null,
+  columnName: string
+) {
+  return (
+    error?.code === "42703" ||
+    error?.message?.includes(columnName) ||
+    error?.details?.includes(columnName)
+  );
+}
+
+function toErrorPayload(error: SupabaseErrorLike | null) {
+  return {
+    code: error?.code,
+    message: error?.message,
+    details: error?.details,
+    hint: error?.hint,
+  };
+}
+
+function getConversationErrorMessage(error: SupabaseErrorLike | null) {
+  if (!error) {
+    return "Impossible de créer la conversation de remboursement.";
+  }
+
+  if (error.code === "42501") {
+    return "Accès refusé par les règles de sécurité Supabase (RLS). Exécutez les migrations RLS du système de remboursement.";
+  }
+
+  if (error.code === "23503") {
+    return "Votre profil utilisateur est manquant en base (foreign key). Exécutez le script supabase/create-profiles.sql.";
+  }
+
+  if (error.code === "42P01") {
+    return "Les tables refund_conversations/refund_messages n'existent pas. Exécutez les migrations Supabase du remboursement.";
+  }
+
+  return "Impossible d'initialiser la conversation de remboursement. Vérifiez les migrations Supabase.";
+}
+
 export default function RemboursementPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -38,9 +96,11 @@ export default function RemboursementPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationStatus, setConversationStatus] = useState<"open" | "resolved" | "cancelled">("open");
   const [isAiHandled, setIsAiHandled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [conversationError, setConversationError] = useState<string | null>(null);
 
   // Scroll to bottom when messages change
   const scrollToBottom = () => {
@@ -57,52 +117,120 @@ export default function RemboursementPage() {
       if (!user?.id) return;
 
       try {
-        // Check if user already has a refund conversation
-        // We take the MOST RECENT conversation for this user
-        const { data: existingConvs, error: convError } = await supabase
+        setConversationError(null);
+
+        // Step 1: Look for an ACTIVE conversation (status = open or pending)
+        const { data: activeConvs, error: convError } = await supabase
           .from("refund_conversations")
-          .select("id, ai_handled")
+          .select("id, ai_handled, status")
           .eq("user_id", user.id)
+          .in("status", ["open"])
           .order("created_at", { ascending: false })
           .limit(1);
 
         if (convError) {
-          console.error("Error loading conversation:", convError);
-          setLoading(false);
-          return;
-        }
+          if (isMissingColumnError(convError, "ai_handled") || isMissingColumnError(convError, "status")) {
+            // Fallback for old schema without ai_handled/status columns
+            const { data: fallbackConvs, error: fallbackError } = await supabase
+              .from("refund_conversations")
+              .select("id")
+              .eq("user_id", user.id)
+              .order("created_at", { ascending: false })
+              .limit(1);
 
-        const existingConv = existingConvs?.[0];
+            if (fallbackError) {
+              console.error("Error loading conversation (fallback):", toErrorPayload(fallbackError));
+              // No conversation at all → show closed state
+              setConversationId(null);
+              setConversationStatus("resolved");
+              setLoading(false);
+              return;
+            }
 
-        if (existingConv) {
-          // Conversation exists, load it
-          setConversationId(existingConv.id);
-          setIsAiHandled(existingConv.ai_handled || false);
-          await loadMessages(existingConv.id);
-        } else {
-          // Create new conversation
-          const { data: newConv, error: createError } = await supabase
-            .from("refund_conversations")
-            .insert({
-              user_id: user.id,
-              status: "open",
-            })
-            .select()
-            .single();
-
-          if (createError) {
-            console.error("Error creating conversation:", createError);
+            if (fallbackConvs?.[0]) {
+              // Conversation exists but no status column → treat as open
+              setConversationId(fallbackConvs[0].id);
+              setConversationStatus("open");
+              setIsAiHandled(false);
+              await loadMessages(fallbackConvs[0].id);
+            } else {
+              // No conversation found → show closed state
+              setConversationId(null);
+              setConversationStatus("resolved");
+            }
             setLoading(false);
             return;
           }
 
-          setConversationId(newConv.id);
-          setIsAiHandled(false);
+          console.error("Error loading conversation:", toErrorPayload(convError));
+          setLoading(false);
+          return;
         }
 
+        // Step 2: Active conversation found
+        if (activeConvs?.[0]) {
+          setConversationId(activeConvs[0].id);
+          setConversationStatus((activeConvs[0].status as "open" | "resolved" | "cancelled") || "open");
+          setIsAiHandled(activeConvs[0].ai_handled || false);
+          await loadMessages(activeConvs[0].id);
+          setLoading(false);
+          return;
+        }
+
+        // Step 3: No active conversation → check if ALL conversations are closed
+        const { data: allConvs } = await supabase
+          .from("refund_conversations")
+          .select("status")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        // No conversation at all, or all are resolved/cancelled → show closed state
+        if (!allConvs?.length || allConvs[0].status !== "open") {
+          setConversationId(null);
+          setConversationStatus("resolved");
+          setLoading(false);
+          return;
+        }
+
+        // Step 4: No conversation exists → create one
+        const { data: newConv, error: createError } = await supabase
+          .from("refund_conversations")
+          .insert({ user_id: user.id, status: "open" })
+          .select()
+          .single();
+
+        if (createError) {
+          if (isMissingColumnError(createError, "status")) {
+            const { data: fallbackCreate } = await supabase
+              .from("refund_conversations")
+              .insert({ user_id: user.id })
+              .select()
+              .single();
+
+            if (fallbackCreate) {
+              setConversationId(fallbackCreate.id);
+              setConversationStatus("open");
+              setIsAiHandled(false);
+            } else {
+              setConversationError(getConversationErrorMessage(createError));
+            }
+          } else {
+            setConversationError(getConversationErrorMessage(createError));
+          }
+          setLoading(false);
+          return;
+        }
+
+        setConversationId(newConv.id);
+        setConversationStatus("open");
+        setIsAiHandled(false);
         setLoading(false);
       } catch (err) {
         console.error("Exception:", err);
+        setConversationError(
+          "Impossible d'initialiser la conversation. Vérifiez la configuration Supabase."
+        );
         setLoading(false);
       }
     };
@@ -221,17 +349,41 @@ export default function RemboursementPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Demande de remboursement</h1>
             <p className="text-gray-500 text-sm">
-              {isAiHandled
+              {conversationStatus !== "open"
+                ? "Conversation terminée"
+                : isAiHandled
                 ? "🤖 Conversation gérée par notre assistant IA"
                 : "Conversation avec SaaS Money Admin"}
             </p>
           </div>
         </div>
 
-        {isAiHandled && (
+        {conversationStatus !== "open" ? (
+          <div className="p-4 bg-gray-100 border border-gray-200 rounded-xl text-center">
+            <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center mx-auto mb-3">
+              <CheckCircle className="w-6 h-6 text-gray-400" />
+            </div>
+            <p className="font-medium text-gray-700">
+              {conversationStatus === "cancelled"
+                ? "Votre demande a été annulée."
+                : "Votre demande a été traitée."}
+            </p>
+            <p className="text-sm text-gray-500 mt-1">
+              Vous ne pouvez plus envoyer de messages dans cette conversation.
+            </p>
+          </div>
+        ) : isAiHandled ? (
           <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-sm text-orange-800">
             <p>
               <strong>ℹ️ Information :</strong> Cette demande est actuellement gérée par notre assistant IA qui connaît les termes du contrat. Un administrateur peut intervenir si nécessaire.
+            </p>
+          </div>
+        ) : null}
+
+        {conversationError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-800">
+            <p>
+              <strong>Erreur conversation :</strong> {conversationError}
             </p>
           </div>
         )}
@@ -306,30 +458,40 @@ export default function RemboursementPage() {
         </div>
 
         {/* Input area */}
-        <div className="p-4 border-t border-gray-200">
-          <div className="flex gap-3">
-            <Input
-              placeholder="Écris ton message..."
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              className="flex-1"
-            />
-            <Button
-              variant="gradient"
-              onClick={handleSendMessage}
-              disabled={!newMessage.trim() || sending}
-              loading={sending}
-            >
-              <Send className="w-4 h-4" />
-            </Button>
+        {conversationStatus !== "open" ? (
+          <div className="p-4 border-t border-gray-200">
+            <p className="text-center text-sm text-gray-400 py-3">
+              Cette conversation est fermée
+            </p>
           </div>
-          <p className="text-xs text-gray-400 mt-2">
-            {isAiHandled
-              ? "🤖 Notre assistant IA te répondra instantanément selon les termes du contrat."
-              : "Un membre de l'équipe SaaS Money te répondra dans les plus brefs délais."}
-          </p>
-        </div>
+        ) : (
+          <div className="p-4 border-t border-gray-200">
+            <div className="flex gap-3">
+              <Input
+                placeholder="Écris ton message..."
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                className="flex-1"
+              />
+              <Button
+                variant="gradient"
+                onClick={handleSendMessage}
+                disabled={!newMessage.trim() || sending || !conversationId || !!conversationError}
+                loading={sending}
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">
+              {conversationError
+                ? "La conversation n'est pas initialisée. Corrige la base Supabase puis recharge la page."
+                : isAiHandled
+                ? "🤖 Notre assistant IA te répondra instantanément selon les termes du contrat."
+                : "Un membre de l'équipe SaaS Money te répondra dans les plus brefs délais."}
+            </p>
+          </div>
+        )}
       </Card>
     </div>
   );

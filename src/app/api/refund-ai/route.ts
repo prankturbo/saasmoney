@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import {
+  generateTextWithPolling,
+  OneShotError,
+  type OneShotMessage,
+} from "@/lib/oneshot";
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,8 +47,8 @@ export async function POST(request: NextRequest) {
       console.error("Error loading history:", historyError);
     }
 
-    // Build OpenAI messages array
-    const openaiMessages: any[] = [
+    // Build OneShot messages array
+    const oneShotMessages: OneShotMessage[] = [
       {
         role: "system",
         content: `Tu es l'assistant IA officiel de SaaS Money, spécialisé dans l'analyse des demandes de remboursement.
@@ -274,28 +274,29 @@ Dans ces cas : "Je transmets ton dossier à un administrateur qui examinera pers
     // Add conversation history
     if (messagesHistory && messagesHistory.length > 0) {
       for (const msg of messagesHistory) {
-        openaiMessages.push({
-          role: msg.user_id === conversation.user_id ? "user" : "assistant",
-          content: msg.message,
+        oneShotMessages.push({
+          role: "user",
+          content:
+            msg.user_id === conversation.user_id
+              ? `[ÉLÈVE] ${msg.message}`
+              : `[ASSISTANT] ${msg.message}`,
         });
       }
     }
 
     // Add current user message
-    openaiMessages.push({
+    oneShotMessages.push({
       role: "user",
       content: userMessage,
     });
 
-    // Call OpenAI
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
-      messages: openaiMessages,
+    const generated = await generateTextWithPolling(oneShotMessages, {
       temperature: 0.7,
       max_tokens: 800,
     });
 
-    const aiResponse = completion.choices[0]?.message?.content || 
+    const aiResponse =
+      generated.textResponse ||
       "Désolé, je n'ai pas pu générer une réponse. Un administrateur va examiner ta demande et te répondra sous 48h.";
 
     // Get admin user ID
@@ -337,6 +338,20 @@ Dans ces cas : "Je transmets ton dossier à un administrateur qui examinera pers
       message,
     });
   } catch (error) {
+    if (error instanceof OneShotError) {
+      console.error("OneShot error in refund-ai route:", error);
+      return NextResponse.json(
+        {
+          error: "AI provider request failed",
+          providerError: {
+            code: error.code || "provider_error",
+            message: error.providerMessage || error.message,
+          },
+        },
+        { status: error.status }
+      );
+    }
+
     console.error("Error in refund-ai route:", error);
     return NextResponse.json(
       { error: "Internal server error" },

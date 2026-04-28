@@ -142,7 +142,19 @@ export function useOneOfOneBookings(userId: string | undefined) {
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Error fetching bookings:", error);
+      const isNoRows = error.code === "PGRST116" || error.code === "PGRST205";
+      const isForbidden = error.code === "42501";
+
+      if (!isNoRows && !isForbidden) {
+        console.error("Error fetching bookings:", {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        });
+      }
+
+      setBookings([]);
       setIsLoading(false);
       return;
     }
@@ -382,7 +394,19 @@ export function useHotsetBookings(userId: string | undefined) {
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Error fetching hotset bookings:", error);
+      const isNoRows = error.code === "PGRST116" || error.code === "PGRST205";
+      const isForbidden = error.code === "42501";
+
+      if (!isNoRows && !isForbidden) {
+        console.error("Error fetching hotset bookings:", {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+        });
+      }
+
+      setBookings([]);
       setIsLoading(false);
       return;
     }

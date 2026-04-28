@@ -383,9 +383,22 @@ export async function getStudentByUserId(userId: string): Promise<StudentRecord 
     .eq("user_id", userId)
     .single();
   
-  if (error && error.code !== "PGRST116") { // PGRST116 = no rows returned
-    console.error("Error fetching student:", error);
+  if (error) {
+    const isNoRows = error.code === "PGRST116" || error.code === "PGRST205";
+    const isForbidden = error.code === "42501";
+
+    if (!isNoRows && !isForbidden) {
+      console.error("Error fetching student:", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+    }
+
+    return null;
   }
+
   return data || null;
 }
 
@@ -763,40 +776,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Load user profile from Supabase
   const loadUserProfile = async (authUser: User): Promise<AuthUser | null> => {
-    // Déterminer le rôle basé sur l'email (fallback)
-    const getRoleFromEmail = (email: string): UserRole => {
-      const closers = ["clement", "elias", "leni", "tino"];
-      const coaches = ["martin", "augustin"];
-      const admins = ["sacha", "quentin"];
-      const username = email.split("@")[0].toLowerCase();
-      
-      if (admins.includes(username)) return "admin";
-      if (coaches.includes(username)) return "coach";
-      if (closers.includes(username)) return "closer";
+    const getRoleFromMetadata = (role: unknown): UserRole => {
+      if (role === "admin" || role === "coach" || role === "closer" || role === "user") {
+        return role;
+      }
       return "user";
     };
 
-    // Essayer de charger depuis Supabase avec timeout manuel
-    const timeoutPromise = new Promise<{ timeout: true }>((resolve) =>
-      setTimeout(() => resolve({ timeout: true }), 2000) // 2 secondes max
-    );
-
-    const profilePromise = supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", authUser.id)
-      .single()
-      .then((result) => ({ ...result, timeout: false }));
+      .maybeSingle();
 
-    const result = await Promise.race([profilePromise, timeoutPromise]);
+    if (profileError) {
+      console.warn("❌ Erreur chargement profil:", {
+        code: profileError.code,
+        message: profileError.message,
+        details: profileError.details,
+        hint: profileError.hint,
+      });
+    }
 
-    if ("timeout" in result && result.timeout) {
-      console.warn("⏱️ Timeout du chargement du profil (2s) - utilisation du fallback basé sur l'email");
-    } else if ("error" in result && result.error) {
-      console.warn("❌ Erreur Supabase:", result.error.message);
-    } else if ("data" in result && result.data) {
-      const profile = result.data;
-      
+    if (profile) {
       // Load student data if user is a student
       if (profile.role === "user") {
         try {
@@ -821,19 +823,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } as AuthUser;
     }
 
-    // Fallback: créer un profil temporaire basé sur l'email
+    // Fallback temporaire uniquement si le profil est introuvable
     const email = authUser.email || "";
     const fallbackProfile: AuthUser = {
       id: authUser.id,
-      email: email,
-      name: email.split("@")[0].charAt(0).toUpperCase() + email.split("@")[0].slice(1),
+      email,
+      name: email ? email.split("@")[0] : "Utilisateur",
       avatar_url: null,
-      role: getRoleFromEmail(email),
+      role: getRoleFromMetadata(authUser.user_metadata?.role),
       coins_balance: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    
+
     return fallbackProfile;
   };
 
@@ -864,23 +866,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Listen for auth changes FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Auth state change handler
-      
       if (!isMounted) return;
-      
-      if (event === "SIGNED_IN" && session?.user) {
+
+      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") && session?.user) {
         const profile = await loadUserProfile(session.user);
         if (isMounted) {
           setUser(profile);
           setIsLoading(false);
         }
-      } else if (event === "SIGNED_OUT") {
+        return;
+      }
+
+      if (event === "SIGNED_OUT") {
         if (isMounted) {
           setUser(null);
           setIsLoading(false);
           cachedStudentData.clear();
         }
-      } else if (event === "INITIAL_SESSION") {
+        return;
+      }
+
+      if (event === "INITIAL_SESSION") {
         if (session?.user) {
           const profile = await loadUserProfile(session.user);
           if (isMounted) {
@@ -1019,6 +1025,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (session?.user) {
       const profile = await loadUserProfile(session.user);
       setUser(profile);
+      await supabase.auth.refreshSession();
     }
   };
 

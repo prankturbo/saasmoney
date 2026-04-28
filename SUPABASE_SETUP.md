@@ -65,7 +65,7 @@ Pour ajouter Google, GitHub, etc. :
 ## 7. Lancer l'application
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 L'app sera disponible sur [http://localhost:3000](http://localhost:3000)

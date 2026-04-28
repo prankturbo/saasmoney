@@ -83,14 +83,8 @@ CREATE POLICY "Admins and coaches can view all hotset bookings" ON public.hotset
     )
   );
 
--- 9. Policy pour que les coachs puissent voir les profils des élèves (pour les réservations)
-CREATE POLICY "Coaches can view student profiles" ON public.profiles
-  FOR SELECT USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles 
-      WHERE id = auth.uid() AND role IN ('admin', 'coach')
-    )
-  );
+-- 9. Policy profiles centralisée ailleurs (évite la récursion RLS)
+-- Ne pas recréer ici de policy SELECT sur public.profiles
 
 -- 10. Policy pour que les coachs puissent modifier le statut des réservations
 CREATE POLICY "Coaches can update booking status" ON public.one_of_one_bookings

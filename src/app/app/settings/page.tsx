@@ -26,6 +26,16 @@ export default function SettingsPage() {
   const [email, setEmail] = useState(user?.email || "");
   const [saving, setSaving] = useState(false);
 
+  const roleLabels: Record<string, string> = {
+    admin: "Admin",
+    coach: "Coach",
+    closer: "Closer",
+    user: "Membre",
+  };
+
+  const role = user?.role || "user";
+  const roleLabel = roleLabels[role] || role;
+
   const handleSave = async () => {
     setSaving(true);
     // Mock save
@@ -113,8 +123,8 @@ export default function SettingsPage() {
               <Shield className="w-5 h-5 text-rose-light" />
               <span className="text-sm text-gray-500">Statut</span>
             </div>
-            <Badge variant={user?.role === "admin" ? "magenta" : "default"}>
-              {user?.role === "admin" ? "Admin" : "Membre"}
+            <Badge variant={role === "admin" ? "magenta" : "default"}>
+              {roleLabel}
             </Badge>
           </div>
 

@@ -38,11 +38,11 @@ UPDATE public.profiles SET role = 'closer', name = 'Tino' WHERE email = 'tino@sa
 
 -- Mettre à jour les Coachs
 UPDATE public.profiles SET role = 'coach', name = 'Martin' WHERE email = 'martin@saasmoney.fr';
-UPDATE public.profiles SET role = 'coach', name = 'Augustin' WHERE email = 'augustin@saasmoney.fr';
+UPDATE public.profiles SET role = 'coach', name = 'Augustin' WHERE email = 'auguste@saasmoney.fr';
 
 -- Mettre à jour les Admins
 UPDATE public.profiles SET role = 'admin', name = 'Sacha' WHERE email = 'sacha@saasmoney.fr';
-UPDATE public.profiles SET role = 'admin', name = 'Quentin' WHERE email = 'quentin@saasmoney.fr';
+UPDATE public.profiles SET role = 'admin', name = 'Quentin' WHERE email = 'auguste@saasmoney.fr';
 
 -- Vérification
 SELECT email, name, role FROM public.profiles WHERE role IN ('closer', 'coach', 'admin') ORDER BY role, name;
